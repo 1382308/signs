@@ -1,0 +1,720 @@
+<!DOCTYPE html>
+<html lang="es" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Signo Veloz</title>
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+  <script src="/_sdk/element_sdk.js"></script>
+  <script src="/_sdk/data_sdk.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@400;500;700&display=swap" rel="stylesheet">
+  <style>
+    * { font-family: 'Rajdhani', sans-serif; }
+    .title-font { font-family: 'Orbitron', monospace; }
+    
+    @keyframes pulse-glow {
+      0%, 100% { box-shadow: 0 0 20px rgba(16, 185, 129, 0.5); }
+      50% { box-shadow: 0 0 40px rgba(16, 185, 129, 0.8); }
+    }
+    
+    @keyframes shake {
+      0%, 100% { transform: translateX(0); }
+      25% { transform: translateX(-10px); }
+      75% { transform: translateX(10px); }
+    }
+    
+    @keyframes combo-pop {
+      0% { transform: scale(1); }
+      50% { transform: scale(1.3); }
+      100% { transform: scale(1); }
+    }
+    
+    @keyframes slide-in {
+      from { transform: translateY(-50px); opacity: 0; }
+      to { transform: translateY(0); opacity: 1; }
+    }
+    
+    @keyframes number-reveal {
+      from { transform: scale(0) rotate(-180deg); opacity: 0; }
+      to { transform: scale(1) rotate(0); opacity: 1; }
+    }
+    
+    .animate-pulse-glow { animation: pulse-glow 1.5s ease-in-out infinite; }
+    .animate-shake { animation: shake 0.5s ease-in-out; }
+    .animate-combo { animation: combo-pop 0.3s ease-out; }
+    .animate-slide-in { animation: slide-in 0.5s ease-out; }
+    .animate-number { animation: number-reveal 0.4s ease-out; }
+    
+    .neon-text {
+      text-shadow: 0 0 10px currentColor, 0 0 20px currentColor, 0 0 30px currentColor;
+    }
+    
+    .glass {
+      background: rgba(255, 255, 255, 0.05);
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+    
+    .progress-bar {
+      background: linear-gradient(90deg, #10b981, #34d399, #6ee7b7);
+      background-size: 200% 100%;
+      animation: gradient-shift 1s linear infinite;
+    }
+    
+    @keyframes gradient-shift {
+      0% { background-position: 0% 50%; }
+      100% { background-position: 200% 50%; }
+    }
+    
+    .btn-arcade {
+      position: relative;
+      overflow: hidden;
+      transition: all 0.2s;
+    }
+    
+    .btn-arcade::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: -100%;
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+      transition: left 0.5s;
+    }
+    
+    .btn-arcade:hover::before {
+      left: 100%;
+    }
+    
+    .option-btn {
+      transition: all 0.3s;
+      cursor: pointer;
+      border: 3px solid;
+    }
+    
+    .option-btn:hover {
+      transform: scale(1.05);
+    }
+    
+    .option-btn.disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    
+    .option-btn.correct {
+      animation: pulse-glow 0.6s ease-out;
+      background: linear-gradient(135deg, #10b981, #34d399) !important;
+      border-color: #10b981 !important;
+    }
+    
+    .option-btn.incorrect {
+      animation: shake 0.5s ease-out;
+      background: linear-gradient(135deg, #ef4444, #f87171) !important;
+      border-color: #ef4444 !important;
+    }
+  </style>
+</head>
+<body class="h-full bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 text-white overflow-auto">
+  <div id="app" class="h-full w-full relative flex">
+    <!-- Main Menu -->
+    <div id="menu-screen" class="h-full w-full flex flex-col items-center justify-center p-4 relative z-10">
+      <div class="text-center animate-slide-in">
+        <h1 id="main-title" class="title-font text-5xl md:text-7xl font-black text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 via-cyan-400 to-purple-400 mb-2">
+          SIGNO VELOZ
+        </h1>
+        <p id="main-subtitle" class="text-xl md:text-2xl text-emerald-300 mb-8">¡Multiplicación con signos!</p>
+        
+        <div class="glass rounded-2xl p-6 md:p-8 max-w-md mx-auto">
+          <div class="mb-6">
+            <label class="block text-emerald-300 text-lg mb-2">👤 Tu Nombre</label>
+            <input type="text" id="player-name" maxlength="15" placeholder="Jugador" 
+              class="w-full bg-slate-800/50 border-2 border-emerald-500/50 rounded-xl px-4 py-3 text-xl text-center focus:border-emerald-400 focus:outline-none transition-colors">
+          </div>
+          
+          <div class="mb-8">
+            <label class="block text-emerald-300 text-lg mb-2">📊 Dificultad</label>
+            <div class="grid grid-cols-3 gap-2">
+              <button onclick="selectDifficulty('easy')" id="diff-easy" class="btn-arcade bg-gradient-to-r from-emerald-600 to-emerald-500 rounded-xl py-2 px-3 font-bold text-sm transition-all hover:scale-105 border-2 border-emerald-400">
+                Fácil (1-6)
+              </button>
+              <button onclick="selectDifficulty('medium')" id="diff-medium" class="btn-arcade bg-slate-700/50 rounded-xl py-2 px-3 font-bold text-sm transition-all hover:scale-105 border-2 border-slate-500">
+                Medio (1-8)
+              </button>
+              <button onclick="selectDifficulty('hard')" id="diff-hard" class="btn-arcade bg-slate-700/50 rounded-xl py-2 px-3 font-bold text-sm transition-all hover:scale-105 border-2 border-slate-500">
+                Difícil (1-9)
+              </button>
+            </div>
+          </div>
+          
+          <button onclick="startGame()" class="btn-arcade w-full bg-gradient-to-r from-emerald-500 to-cyan-500 rounded-xl py-4 text-2xl font-black tracking-wider animate-pulse-glow hover:scale-105 transition-transform">
+            🚀 ¡JUGAR!
+          </button>
+          
+          <button onclick="showLeaderboard()" class="btn-arcade w-full mt-4 bg-slate-700/50 rounded-xl py-3 text-lg font-bold border-2 border-purple-500/50 hover:border-purple-400 transition-all">
+            🏆 Ver Podio
+          </button>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Game Screen -->
+    <div id="game-screen" class="h-full w-full flex-col items-center justify-between p-4 relative z-10 hidden">
+      <!-- Top Bar -->
+      <div class="w-full max-w-2xl">
+        <div class="flex justify-between items-center mb-4">
+          <div class="flex items-center gap-2">
+            <span class="text-2xl">❤️</span>
+            <div id="lives" class="flex gap-1">
+              <span class="text-2xl">💚</span>
+              <span class="text-2xl">💚</span>
+              <span class="text-2xl">💚</span>
+            </div>
+          </div>
+          <div class="glass rounded-xl px-4 py-2">
+            <span class="text-emerald-300">PUNTOS:</span>
+            <span id="score" class="title-font text-2xl text-emerald-400 ml-2">0</span>
+          </div>
+        </div>
+        
+        <!-- Timer Bar -->
+        <div class="w-full h-4 bg-slate-800 rounded-full overflow-hidden mb-2">
+          <div id="timer-bar" class="h-full progress-bar rounded-full transition-all duration-100" style="width: 100%"></div>
+        </div>
+        
+        <!-- Combo Display -->
+        <div class="text-center h-8">
+          <span id="combo-display" class="title-font text-2xl text-yellow-400 neon-text hidden">
+            🔥 COMBO x<span id="combo-count">2</span>
+          </span>
+        </div>
+      </div>
+      
+      <!-- Problem Display -->
+      <div class="flex-1 flex flex-col items-center justify-center w-full max-w-2xl">
+        <div id="problem-container" class="glass rounded-3xl p-8 md:p-12 w-full text-center">
+          <div id="problem" class="title-font text-4xl md:text-6xl font-black text-white mb-4">
+            <span id="num1" class="inline-block">(−7)</span>
+            <span class="text-emerald-400 mx-4">×</span>
+            <span id="num2" class="inline-block">(+6)</span>
+          </div>
+          <div id="equals" class="text-3xl text-slate-400">=</div>
+        </div>
+        
+        <!-- Feedback -->
+        <div id="feedback" class="h-16 flex items-center justify-center mt-4">
+          <!-- Dynamic feedback appears here -->
+        </div>
+      </div>
+      
+      <!-- Multiple Choice Options -->
+      <div id="options-area" class="w-full max-w-2xl grid grid-cols-2 gap-4 pb-4">
+        <button onclick="selectOption(0)" class="option-btn bg-gradient-to-br from-cyan-600 to-cyan-500 rounded-2xl py-5 px-4 text-2xl md:text-3xl font-black border-cyan-400">
+          <span id="option-0">42</span>
+        </button>
+        <button onclick="selectOption(1)" class="option-btn bg-gradient-to-br from-purple-600 to-purple-500 rounded-2xl py-5 px-4 text-2xl md:text-3xl font-black border-purple-400">
+          <span id="option-1">-42</span>
+        </button>
+        <button onclick="selectOption(2)" class="option-btn bg-gradient-to-br from-pink-600 to-pink-500 rounded-2xl py-5 px-4 text-2xl md:text-3xl font-black border-pink-400">
+          <span id="option-2">24</span>
+        </button>
+        <button onclick="selectOption(3)" class="option-btn bg-gradient-to-br from-orange-600 to-orange-500 rounded-2xl py-5 px-4 text-2xl md:text-3xl font-black border-orange-400">
+          <span id="option-3">-24</span>
+        </button>
+      </div>
+    </div>
+    
+    <!-- Game Over Screen -->
+    <div id="gameover-screen" class="h-full w-full flex-col items-center justify-center p-4 relative z-10 hidden">
+      <div class="text-center animate-slide-in">
+        <h2 class="title-font text-4xl md:text-6xl font-black text-red-400 neon-text mb-4">¡GAME OVER!</h2>
+        
+        <div class="glass rounded-2xl p-8 max-w-md mx-auto mb-6">
+          <div class="text-6xl mb-4">🎮</div>
+          <p class="text-2xl text-slate-300 mb-2">Puntuación Final</p>
+          <p id="final-score" class="title-font text-5xl text-emerald-400 neon-text mb-4">0</p>
+          
+          <div class="grid grid-cols-2 gap-4 text-center">
+            <div class="bg-slate-800/50 rounded-xl p-3">
+              <p class="text-slate-400">Máx Combo</p>
+              <p id="final-combo" class="title-font text-2xl text-yellow-400">0</p>
+            </div>
+            <div class="bg-slate-800/50 rounded-xl p-3">
+              <p class="text-slate-400">Aciertos</p>
+              <p id="final-correct" class="title-font text-2xl text-cyan-400">0</p>
+            </div>
+          </div>
+        </div>
+        
+        <div id="save-status" class="text-emerald-400 mb-4 h-6"></div>
+        
+        <div class="flex flex-col gap-3 max-w-md mx-auto">
+          <button onclick="startGame()" class="btn-arcade bg-gradient-to-r from-emerald-500 to-cyan-500 rounded-xl py-4 text-xl font-black hover:scale-105 transition-transform">
+            🔄 Jugar de Nuevo
+          </button>
+          <button onclick="showMenu()" class="btn-arcade bg-slate-700/50 rounded-xl py-3 text-lg font-bold border-2 border-slate-500 hover:border-emerald-400 transition-all">
+            🏠 Menú Principal
+          </button>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Leaderboard Screen -->
+    <div id="leaderboard-screen" class="h-full w-full flex-col items-center justify-center p-4 relative z-10 hidden">
+      <div class="text-center animate-slide-in w-full max-w-lg">
+        <h2 class="title-font text-4xl md:text-5xl font-black text-yellow-400 neon-text mb-6">🏆 PODIO 🏆</h2>
+        
+        <div class="glass rounded-2xl p-6 mb-6">
+          <div id="leaderboard-list" class="space-y-3">
+            <p class="text-slate-400">Cargando...</p>
+          </div>
+        </div>
+        
+        <button onclick="showMenu()" class="btn-arcade bg-gradient-to-r from-purple-600 to-pink-500 rounded-xl py-3 px-8 text-xl font-bold hover:scale-105 transition-transform">
+          ← Volver
+        </button>
+      </div>
+    </div>
+  </div>
+  
+  <script>
+    // Game State
+    let gameState = {
+      difficulty: 'easy',
+      playerName: 'Jugador',
+      score: 0,
+      lives: 3,
+      combo: 0,
+      maxCombo: 0,
+      correctAnswers: 0,
+      currentProblem: null,
+      currentOptions: [],
+      timeLeft: 100,
+      timerInterval: null,
+      leaderboard: [],
+      answering: false
+    };
+    
+    const difficultyRanges = {
+      easy: { min: 1, max: 6, time: 15000 },
+      medium: { min: 1, max: 8, time: 12000 },
+      hard: { min: 1, max: 9, time: 10000 }
+    };
+    
+    // Config for Element SDK
+    const defaultConfig = {
+      game_title: 'SIGNO VELOZ',
+      subtitle: '¡Multiplicación con signos!',
+      background_color: '#0f172a',
+      accent_color: '#10b981',
+      text_color: '#ffffff',
+      secondary_color: '#7c3aed',
+      surface_color: '#1e293b'
+    };
+    
+    let config = { ...defaultConfig };
+    
+    // Initialize SDKs
+    async function initializeApp() {
+      // Element SDK
+      if (window.elementSdk) {
+        window.elementSdk.init({
+          defaultConfig,
+          onConfigChange: async (newConfig) => {
+            config = { ...defaultConfig, ...newConfig };
+            applyConfig();
+          },
+          mapToCapabilities: (cfg) => ({
+            recolorables: [
+              {
+                get: () => cfg.background_color || defaultConfig.background_color,
+                set: (v) => { cfg.background_color = v; window.elementSdk.setConfig({ background_color: v }); }
+              },
+              {
+                get: () => cfg.surface_color || defaultConfig.surface_color,
+                set: (v) => { cfg.surface_color = v; window.elementSdk.setConfig({ surface_color: v }); }
+              },
+              {
+                get: () => cfg.text_color || defaultConfig.text_color,
+                set: (v) => { cfg.text_color = v; window.elementSdk.setConfig({ text_color: v }); }
+              },
+              {
+                get: () => cfg.accent_color || defaultConfig.accent_color,
+                set: (v) => { cfg.accent_color = v; window.elementSdk.setConfig({ accent_color: v }); }
+              },
+              {
+                get: () => cfg.secondary_color || defaultConfig.secondary_color,
+                set: (v) => { cfg.secondary_color = v; window.elementSdk.setConfig({ secondary_color: v }); }
+              }
+            ],
+            borderables: [],
+            fontEditable: undefined,
+            fontSizeable: undefined
+          }),
+          mapToEditPanelValues: (cfg) => new Map([
+            ['game_title', cfg.game_title || defaultConfig.game_title],
+            ['subtitle', cfg.subtitle || defaultConfig.subtitle]
+          ])
+        });
+      }
+      
+      // Data SDK
+      if (window.dataSdk) {
+        const result = await window.dataSdk.init({
+          onDataChanged: (data) => {
+            gameState.leaderboard = data.sort((a, b) => b.score - a.score).slice(0, 10);
+            updateLeaderboardDisplay();
+          }
+        });
+        if (!result.isOk) {
+          console.error('Failed to init data SDK');
+        }
+      }
+      
+      applyConfig();
+    }
+    
+    function applyConfig() {
+      const title = config.game_title || defaultConfig.game_title;
+      const subtitle = config.subtitle || defaultConfig.subtitle;
+      
+      document.getElementById('main-title').textContent = title;
+      document.getElementById('main-subtitle').textContent = subtitle;
+      
+      document.body.style.background = `linear-gradient(135deg, ${config.background_color}, ${config.secondary_color}, ${config.background_color})`;
+    }
+    
+    function selectDifficulty(diff) {
+      gameState.difficulty = diff;
+      const buttons = ['easy', 'medium', 'hard'];
+      buttons.forEach(d => {
+        const btn = document.getElementById('diff-' + d);
+        btn.className = d === diff
+          ? 'btn-arcade bg-gradient-to-r from-emerald-600 to-emerald-500 rounded-xl py-2 px-3 font-bold text-sm transition-all hover:scale-105 border-2 border-emerald-400'
+          : 'btn-arcade bg-slate-700/50 rounded-xl py-2 px-3 font-bold text-sm transition-all hover:scale-105 border-2 border-slate-500';
+      });
+    }
+    
+    function startGame() {
+      gameState.playerName = document.getElementById('player-name').value.trim() || 'Jugador';
+      gameState.score = 0;
+      gameState.lives = 3;
+      gameState.combo = 0;
+      gameState.maxCombo = 0;
+      gameState.correctAnswers = 0;
+      gameState.answering = false;
+      
+      showScreen('game');
+      updateUI();
+      nextProblem();
+    }
+    
+    function generateProblem() {
+      const range = difficultyRanges[gameState.difficulty];
+      const num1 = Math.floor(Math.random() * (range.max - range.min + 1)) + range.min;
+      const num2 = Math.floor(Math.random() * (range.max - range.min + 1)) + range.min;
+      const sign1 = Math.random() < 0.5 ? 1 : -1;
+      const sign2 = Math.random() < 0.5 ? 1 : -1;
+      
+      return {
+        num1: num1 * sign1,
+        num2: num2 * sign2,
+        result: num1 * sign1 * num2 * sign2
+      };
+    }
+    
+    function generateOptions() {
+      const correct = gameState.currentProblem.result;
+      const options = new Set([correct]);
+      
+      // Add wrong answers
+      while (options.size < 4) {
+        const variations = [
+          -correct,                           // Wrong sign
+          Math.abs(correct) + (Math.random() < 0.5 ? 1 : -1) * Math.floor(Math.random() * 5 + 1),  // Wrong magnitude
+          -correct + (Math.random() < 0.5 ? 1 : -1) * Math.floor(Math.random() * 3 + 1),  // Wrong sign + variation
+        ];
+        
+        variations.forEach(v => {
+          if (options.size < 4 && v !== correct && !options.has(v)) {
+            options.add(v);
+          }
+        });
+      }
+      
+      // Shuffle options
+      const shuffled = Array.from(options).sort(() => Math.random() - 0.5);
+      return shuffled;
+    }
+    
+    function nextProblem() {
+      gameState.currentProblem = generateProblem();
+      gameState.currentOptions = generateOptions();
+      gameState.answering = false;
+      
+      const p = gameState.currentProblem;
+      
+      // Format numbers
+      const formatNum = (n) => n >= 0 ? `(+${n})` : `(${n})`;
+      
+      const num1El = document.getElementById('num1');
+      const num2El = document.getElementById('num2');
+      
+      num1El.textContent = formatNum(p.num1);
+      num2El.textContent = formatNum(p.num2);
+      
+      // Animate numbers
+      num1El.classList.remove('animate-number');
+      num2El.classList.remove('animate-number');
+      void num1El.offsetWidth;
+      num1El.classList.add('animate-number');
+      num2El.classList.add('animate-number');
+      
+      // Color code
+      num1El.style.color = p.num1 >= 0 ? '#34d399' : '#f87171';
+      num2El.style.color = p.num2 >= 0 ? '#34d399' : '#f87171';
+      
+      // Update options
+      const colors = ['from-cyan-600 to-cyan-500 border-cyan-400', 'from-purple-600 to-purple-500 border-purple-400', 'from-pink-600 to-pink-500 border-pink-400', 'from-orange-600 to-orange-500 border-orange-400'];
+      
+      for (let i = 0; i < 4; i++) {
+        const btn = document.querySelectorAll('.option-btn')[i];
+        const span = document.getElementById('option-' + i);
+        
+        span.textContent = gameState.currentOptions[i];
+        btn.className = `option-btn bg-gradient-to-br ${colors[i]} rounded-2xl py-5 px-4 text-2xl md:text-3xl font-black border`;
+        btn.style.pointerEvents = 'auto';
+        btn.classList.remove('correct', 'incorrect', 'disabled');
+      }
+      
+      // Clear feedback
+      document.getElementById('feedback').innerHTML = '';
+      
+      // Start timer
+      startTimer();
+    }
+    
+    function startTimer() {
+      if (gameState.timerInterval) clearInterval(gameState.timerInterval);
+      
+      const duration = difficultyRanges[gameState.difficulty].time;
+      gameState.timeLeft = 100;
+      const timerBar = document.getElementById('timer-bar');
+      const startTime = Date.now();
+      
+      gameState.timerInterval = setInterval(() => {
+        const elapsed = Date.now() - startTime;
+        gameState.timeLeft = Math.max(0, 100 - (elapsed / duration * 100));
+        timerBar.style.width = gameState.timeLeft + '%';
+        
+        if (gameState.timeLeft < 30) {
+          timerBar.style.background = 'linear-gradient(90deg, #ef4444, #f87171)';
+        } else if (gameState.timeLeft < 60) {
+          timerBar.style.background = 'linear-gradient(90deg, #f59e0b, #fbbf24)';
+        }
+        
+        if (gameState.timeLeft <= 0 && !gameState.answering) {
+          handleWrongAnswer();
+        }
+      }, 50);
+    }
+    
+    function selectOption(index) {
+      if (gameState.answering) return;
+      gameState.answering = true;
+      clearInterval(gameState.timerInterval);
+      
+      const correct = gameState.currentOptions[gameState.currentOptions.indexOf(gameState.currentProblem.result)];
+      const selected = gameState.currentOptions[index];
+      
+      const buttons = document.querySelectorAll('.option-btn');
+      const correctIndex = gameState.currentOptions.indexOf(correct);
+      
+      buttons.forEach((btn, i) => {
+        btn.style.pointerEvents = 'none';
+      });
+      
+      if (selected === gameState.currentProblem.result) {
+        handleCorrectAnswer(correctIndex);
+      } else {
+        handleWrongAnswer(correctIndex, index);
+      }
+    }
+    
+    function handleCorrectAnswer(correctIndex) {
+      gameState.combo++;
+      if (gameState.combo > gameState.maxCombo) gameState.maxCombo = gameState.combo;
+      gameState.correctAnswers++;
+      
+      let points = 100;
+      if (gameState.combo >= 3) points += 50 * (gameState.combo - 2);
+      points += Math.floor(gameState.timeLeft);
+      gameState.score += points;
+      
+      const correctBtn = document.querySelectorAll('.option-btn')[correctIndex];
+      correctBtn.classList.add('correct');
+      
+      showFeedback(true, points);
+      updateUI();
+      
+      setTimeout(() => nextProblem(), 1500);
+    }
+    
+    function handleWrongAnswer(correctIndex, wrongIndex) {
+      gameState.combo = 0;
+      gameState.lives--;
+      
+      const container = document.getElementById('problem-container');
+      container.classList.add('animate-shake');
+      setTimeout(() => container.classList.remove('animate-shake'), 500);
+      
+      const correctBtn = document.querySelectorAll('.option-btn')[correctIndex];
+      correctBtn.classList.add('correct');
+      
+      if (wrongIndex !== undefined) {
+        const wrongBtn = document.querySelectorAll('.option-btn')[wrongIndex];
+        wrongBtn.classList.add('incorrect');
+      }
+      
+      showFeedback(false, 0);
+      updateUI();
+      
+      if (gameState.lives <= 0) {
+        setTimeout(() => endGame(), 1500);
+      } else {
+        setTimeout(() => nextProblem(), 1500);
+      }
+    }
+    
+    function showFeedback(correct, points) {
+      const feedback = document.getElementById('feedback');
+      
+      if (correct) {
+        let message = '✓ ¡Correcto!';
+        if (gameState.combo >= 3) message = `🔥 ¡COMBO x${gameState.combo}!`;
+        if (gameState.combo >= 5) message = `⚡ ¡INCREÍBLE x${gameState.combo}!`;
+        if (gameState.combo >= 10) message = `💥 ¡LEGENDARIO x${gameState.combo}!`;
+        
+        feedback.innerHTML = `
+          <div class="text-emerald-400 text-2xl font-bold animate-combo">
+            ${message} <span class="text-yellow-400">+${points}</span>
+          </div>
+        `;
+      } else {
+        feedback.innerHTML = `
+          <div class="text-red-400 text-2xl font-bold">
+            ✗ Incorrecto
+          </div>
+        `;
+      }
+      
+      const comboDisplay = document.getElementById('combo-display');
+      if (gameState.combo >= 2) {
+        document.getElementById('combo-count').textContent = gameState.combo;
+        comboDisplay.classList.remove('hidden');
+        comboDisplay.classList.add('animate-combo');
+      } else {
+        comboDisplay.classList.add('hidden');
+      }
+    }
+    
+    function updateUI() {
+      document.getElementById('score').textContent = gameState.score;
+      
+      const livesContainer = document.getElementById('lives');
+      livesContainer.innerHTML = '';
+      for (let i = 0; i < 3; i++) {
+        const heart = document.createElement('span');
+        heart.className = 'text-2xl transition-all';
+        heart.textContent = i < gameState.lives ? '💚' : '🖤';
+        livesContainer.appendChild(heart);
+      }
+      
+      document.getElementById('timer-bar').style.background = '';
+    }
+    
+    async function endGame() {
+      showScreen('gameover');
+      
+      document.getElementById('final-score').textContent = gameState.score;
+      document.getElementById('final-combo').textContent = gameState.maxCombo;
+      document.getElementById('final-correct').textContent = gameState.correctAnswers;
+      
+      if (window.dataSdk && gameState.score > 0) {
+        const saveStatus = document.getElementById('save-status');
+        saveStatus.textContent = 'Guardando puntuación...';
+        
+        if (gameState.leaderboard.length >= 999) {
+          saveStatus.textContent = '⚠️ Límite de registros alcanzado';
+          return;
+        }
+        
+        const result = await window.dataSdk.create({
+          player_name: gameState.playerName,
+          score: gameState.score,
+          max_combo: gameState.maxCombo,
+          created_at: new Date().toISOString()
+        });
+        
+        if (result.isOk) {
+          saveStatus.textContent = '✓ ¡Puntuación guardada!';
+        } else {
+          saveStatus.textContent = '✗ Error al guardar';
+        }
+      }
+    }
+    
+    function showLeaderboard() {
+      showScreen('leaderboard');
+      updateLeaderboardDisplay();
+    }
+    
+    function updateLeaderboardDisplay() {
+      const list = document.getElementById('leaderboard-list');
+      
+      if (gameState.leaderboard.length === 0) {
+        list.innerHTML = '<p class="text-slate-400 py-8">No hay puntuaciones aún. ¡Sé el primero!</p>';
+        return;
+      }
+      
+      const medals = ['🥇', '🥈', '🥉'];
+      
+      list.innerHTML = gameState.leaderboard.slice(0, 10).map((entry, i) => `
+        <div class="flex items-center justify-between p-3 rounded-xl ${i < 3 ? 'bg-gradient-to-r from-yellow-500/20 to-transparent' : 'bg-slate-800/30'}">
+          <div class="flex items-center gap-3">
+            <span class="text-2xl w-8">${medals[i] || (i + 1)}</span>
+            <div class="text-left">
+              <p class="font-bold text-lg">${entry.player_name}</p>
+              <p class="text-xs text-slate-400">${entry.created_at ? new Date(entry.created_at).toLocaleDateString('es-ES') : ''}</p>
+            </div>
+          </div>
+          <div class="text-right">
+            <p class="title-font text-xl text-emerald-400">${entry.score}</p>
+            <p class="text-xs text-yellow-400">Combo x${entry.max_combo}</p>
+          </div>
+        </div>
+      `).join('');
+    }
+    
+    function showMenu() {
+      if (gameState.timerInterval) clearInterval(gameState.timerInterval);
+      showScreen('menu');
+    }
+    
+    function showScreen(screen) {
+      ['menu', 'game', 'gameover', 'leaderboard'].forEach(s => {
+        const el = document.getElementById(s + '-screen');
+        el.classList.add('hidden');
+        el.classList.remove('flex');
+      });
+      
+      const targetEl = document.getElementById(screen + '-screen');
+      targetEl.classList.remove('hidden');
+      targetEl.classList.add('flex');
+    }
+    
+    // Initialize
+    initializeApp();
+  </script>
+<script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'9cefc8a1411b7b2b',t:'MTc3MTI3MzYyNS4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</html>
