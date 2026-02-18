@@ -95,33 +95,38 @@
     import { getDatabase, ref, push, set, get, query, limitToLast } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-database.js";
     import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/12.9.0/firebase-auth.js";
 
-    // 1) Reemplaza con tu configuración real (Firebase Console → Project settings → Web app)
     const firebaseConfig = {
-  apiKey: "AIzaSyBcwFxvsXYwGbPzCiX8koubk3ka_1gsuaI",
-  authDomain: "signo-veloz.firebaseapp.com",
-  databaseURL: "https://signo-veloz-default-rtdb.firebaseio.com",
-  projectId: "signo-veloz",
-  storageBucket: "signo-veloz.firebasestorage.app",
-  messagingSenderId: "1024909341476",
-  appId: "1:1024909341476:web:e9d6349250cbcba254f9b1"
-  };
+      apiKey: "AIzaSyBcwFxvsXYwGbPzCiX8koubk3ka_1gsuaI",
+      authDomain: "signo-veloz.firebaseapp.com",
+      databaseURL: "https://signo-veloz-default-rtdb.firebaseio.com",
+      projectId: "signo-veloz",
+      storageBucket: "signo-veloz.firebasestorage.app",
+      messagingSenderId: "1024909341476",
+      appId: "1:1024909341476:web:e9d6349250cbcba254f9b1"
+    };
 
     const app = initializeApp(firebaseConfig);
     const db = getDatabase(app);
     const auth = getAuth(app);
 
-    // Login anónimo (recomendado para reglas: request.auth != null)
     try { await signInAnonymously(auth); } catch (e) { console.error("Anon auth failed", e); }
 
-    const safeName = (s) => String(s || "Equipo").trim().slice(0, 15).replace(/[<>]/g, "");
+    const safeText = (s, max=24) => String(s || "").trim().slice(0, max).replace(/[<>]/g, "");
+    const safeGroupId = (s) => safeText(s, 3).toUpperCase().replace(/[^0-9A-Z°]/g, "").replace("°","");
 
     async function saveScore(entry) {
       const clean = {
-        player_name: safeName(entry.player_name),
+        player_name: safeText(entry.player_name || "Jugador", 15),
+        group_id: safeGroupId(entry.group_id || "1G"),   // "1G".."3K"
+        grade: Number(entry.grade) || 1,                 // 1..3
+        group_letter: safeText(entry.group_letter || "G", 1).toUpperCase(), // G..K
+
         score: Number(entry.score) || 0,
         max_combo: Number(entry.max_combo) || 0,
         correct_answers: Number(entry.correct_answers) || 0,
-        difficulty: String(entry.difficulty || "easy"),
+        questions_answered: Number(entry.questions_answered) || 0,
+        max_questions: Number(entry.max_questions) || 30,
+
         created_at: new Date().toISOString()
       };
       const key = push(ref(db, "scores")).key;
@@ -129,32 +134,88 @@
       return key;
     }
 
-    async function fetchTop3AndRank(myKey, maxFetch = 1000) {
+    // Ranking por grupo: toma el MEJOR puntaje de cada grupo (desempate: fecha más antigua)
+    async function fetchGroupRanking(myGroupId, maxFetch = 2000) {
       const snap = await get(query(ref(db, "scores"), limitToLast(maxFetch)));
       const data = snap.exists() ? snap.val() : {};
       const arr = Object.entries(data).map(([key, v]) => ({ key, ...v }));
 
-      // score desc; desempate: created_at asc
-      arr.sort((a, b) => {
-        const ds = (b.score || 0) - (a.score || 0);
+      // map: group_id -> bestEntry
+      const bestByGroup = new Map();
+      for (const e of arr) {
+        const gid = safeGroupId(e.group_id || "");
+        if (!gid) continue;
+
+        const prev = bestByGroup.get(gid);
+        if (!prev) {
+          bestByGroup.set(gid, e);
+          continue;
+        }
+        const s1 = Number(prev.score) || 0;
+        const s2 = Number(e.score) || 0;
+        if (s2 > s1) {
+          bestByGroup.set(gid, e);
+        } else if (s2 === s1) {
+          // desempate: created_at asc (más antiguo primero)
+          const t1 = String(prev.created_at || "");
+          const t2 = String(e.created_at || "");
+          if (t2 && t1 && t2.localeCompare(t1) < 0) bestByGroup.set(gid, e);
+        }
+      }
+
+      const groups = Array.from(bestByGroup.entries()).map(([group_id, best]) => ({ group_id, best }));
+      groups.sort((a, b) => {
+        const ds = (Number(b.best.score) || 0) - (Number(a.best.score) || 0);
         if (ds !== 0) return ds;
-        return String(a.created_at || "").localeCompare(String(b.created_at || ""));
+        return String(a.best.created_at || "").localeCompare(String(b.best.created_at || ""));
       });
 
-      const top3 = arr.slice(0, 3);
-      const myIndex = myKey ? arr.findIndex(x => x.key === myKey) : -1;
+      const myIndex = myGroupId ? groups.findIndex(x => x.group_id === safeGroupId(myGroupId)) : -1;
       const myRank = myIndex >= 0 ? myIndex + 1 : null;
-      const myEntry = myIndex >= 0 ? arr[myIndex] : null;
 
-      return { top3, myRank, myEntry, total: arr.length };
+      return {
+        groups,
+        myRank,
+        totalGroups: groups.length,
+        myGroup: myIndex >= 0 ? groups[myIndex] : null
+      };
     }
 
-    window.leaderboardApi = { saveScore, fetchTop3AndRank };
+    window.leaderboardApi = { saveScore, fetchGroupRanking };
   </script>
 </head>
 
 <body class="h-full bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 text-white overflow-auto">
   <div id="app" class="h-full w-full relative flex">
+
+    <!-- Overlay confirmación de grupo -->
+    <div id="confirm-overlay" class="hidden absolute inset-0 z-50 items-center justify-center p-4">
+      <div class="absolute inset-0 bg-black/60"></div>
+      <div class="relative glass rounded-3xl p-6 max-w-md w-full animate-slide-in">
+        <h3 class="title-font text-2xl font-black text-yellow-400 neon-text mb-2">⚠️ Confirmación</h3>
+        <p class="text-slate-200 text-lg mb-4">
+          La competencia será <span class="text-emerald-300 font-bold">por grupos</span>.
+          Confirma que tu grupo es:
+        </p>
+
+        <div class="bg-slate-800/50 rounded-2xl p-4 border border-emerald-500/30 mb-4">
+          <p class="text-slate-300">Nombre:</p>
+          <p id="confirm-name" class="title-font text-xl text-cyan-300">—</p>
+          <p class="text-slate-300 mt-2">Grupo:</p>
+          <p id="confirm-group" class="title-font text-3xl text-emerald-400 neon-text">—</p>
+        </div>
+
+        <div class="flex gap-3">
+          <button onclick="confirmStart(true)" class="btn-arcade flex-1 bg-gradient-to-r from-emerald-500 to-cyan-500 rounded-xl py-3 text-xl font-black hover:scale-105 transition-transform">
+            ✅ Confirmar
+          </button>
+          <button onclick="confirmStart(false)" class="btn-arcade flex-1 bg-slate-700/50 rounded-xl py-3 text-lg font-bold border-2 border-slate-500 hover:border-yellow-400 transition-all">
+            ✏️ Cambiar
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- Main Menu -->
     <div id="menu-screen" class="h-full w-full flex flex-col items-center justify-center p-4 relative z-10">
       <div class="text-center animate-slide-in">
@@ -164,28 +225,44 @@
         <p id="main-subtitle" class="text-xl md:text-2xl text-emerald-300 mb-8">¡Multiplicación con signos!</p>
 
         <div class="glass rounded-2xl p-6 md:p-8 max-w-md mx-auto">
-          <div class="mb-6">
+          <div class="mb-5">
             <label class="block text-emerald-300 text-lg mb-2">👤 Tu Nombre</label>
-            <input type="text" id="player-name" maxlength="15" placeholder="Jugador"
+            <input type="text" id="player-name" maxlength="15" placeholder="Escribe tu nombre"
               class="w-full bg-slate-800/50 border-2 border-emerald-500/50 rounded-xl px-4 py-3 text-xl text-center focus:border-emerald-400 focus:outline-none transition-colors">
+            <p id="name-error" class="text-red-300 text-sm mt-2 hidden">Escribe tu nombre para poder jugar.</p>
           </div>
 
-          <div class="mb-8">
-            <label class="block text-emerald-300 text-lg mb-2">📊 Dificultad</label>
+          <!-- Grado (antes dificultad) -->
+          <div class="mb-5">
+            <label class="block text-emerald-300 text-lg mb-2">🎓 Grado</label>
             <div class="grid grid-cols-3 gap-2">
-              <button onclick="selectDifficulty('easy')" id="diff-easy"
+              <button onclick="selectGrade(1)" id="grade-1"
                 class="btn-arcade bg-gradient-to-r from-emerald-600 to-emerald-500 rounded-xl py-2 px-3 font-bold text-sm transition-all hover:scale-105 border-2 border-emerald-400">
-                Fácil (1-6)
+                Primero
               </button>
-              <button onclick="selectDifficulty('medium')" id="diff-medium"
+              <button onclick="selectGrade(2)" id="grade-2"
                 class="btn-arcade bg-slate-700/50 rounded-xl py-2 px-3 font-bold text-sm transition-all hover:scale-105 border-2 border-slate-500">
-                Medio (1-8)
+                Segundo
               </button>
-              <button onclick="selectDifficulty('hard')" id="diff-hard"
+              <button onclick="selectGrade(3)" id="grade-3"
                 class="btn-arcade bg-slate-700/50 rounded-xl py-2 px-3 font-bold text-sm transition-all hover:scale-105 border-2 border-slate-500">
-                Difícil (1-9)
+                Tercero
               </button>
             </div>
+          </div>
+
+          <!-- Grupo (G..K) -->
+          <div class="mb-8">
+            <label class="block text-emerald-300 text-lg mb-2">🏷️ Grupo</label>
+            <select id="group-letter"
+              class="w-full bg-slate-800/50 border-2 border-emerald-500/50 rounded-xl px-4 py-3 text-xl text-center focus:border-emerald-400 focus:outline-none transition-colors">
+              <option value="G">G</option>
+              <option value="H">H</option>
+              <option value="I">I</option>
+              <option value="J">J</option>
+              <option value="K">K</option>
+            </select>
+            <p class="text-slate-400 text-sm mt-2">Ejemplo: 1°G, 2°H, 3°K</p>
           </div>
 
           <button onclick="startGame()"
@@ -195,7 +272,7 @@
 
           <button onclick="showLeaderboard()"
             class="btn-arcade w-full mt-4 bg-slate-700/50 rounded-xl py-3 text-lg font-bold border-2 border-purple-500/50 hover:border-purple-400 transition-all">
-            🏆 Ver Podio
+            🏆 Ver Ranking de Grupos
           </button>
         </div>
       </div>
@@ -206,7 +283,6 @@
       <!-- Top Bar -->
       <div class="w-full max-w-2xl">
         <div class="flex justify-between items-center mb-4">
-          <!-- FIX CORAZONES: se quitó el ❤️ extra; ahora solo hay 3 en #lives -->
           <div class="flex items-center gap-3">
             <span class="text-slate-200 font-bold tracking-wide">VIDAS</span>
             <div id="lives" class="flex gap-1" aria-label="Vidas">
@@ -216,9 +292,17 @@
             </div>
           </div>
 
-          <div class="glass rounded-xl px-4 py-2">
-            <span class="text-emerald-300">PUNTOS:</span>
-            <span id="score" class="title-font text-2xl text-emerald-400 ml-2">0</span>
+          <div class="glass rounded-xl px-4 py-2 text-right">
+            <div class="text-slate-200 text-xs">
+              <span id="hud-group" class="text-emerald-300 font-bold">—</span>
+              <span class="text-slate-500">·</span>
+              <span class="text-slate-300">Pregunta</span>
+              <span id="hud-q" class="text-cyan-300 font-bold">0</span>/<span id="hud-qmax" class="text-slate-400">30</span>
+            </div>
+            <div>
+              <span class="text-emerald-300">PUNTOS:</span>
+              <span id="score" class="title-font text-2xl text-emerald-400 ml-2">0</span>
+            </div>
           </div>
         </div>
 
@@ -270,10 +354,15 @@
     <!-- Game Over Screen -->
     <div id="gameover-screen" class="h-full w-full flex-col items-center justify-center p-4 relative z-10 hidden">
       <div class="text-center animate-slide-in">
-        <h2 class="title-font text-4xl md:text-6xl font-black text-red-400 neon-text mb-4">¡GAME OVER!</h2>
+        <h2 class="title-font text-4xl md:text-6xl font-black text-red-400 neon-text mb-4">¡FIN!</h2>
 
         <div class="glass rounded-2xl p-8 max-w-md mx-auto mb-6">
           <div class="text-6xl mb-4">🎮</div>
+
+          <p class="text-slate-300 mb-1">
+            Grupo: <span id="final-group" class="text-emerald-300 font-bold">—</span>
+          </p>
+
           <p class="text-2xl text-slate-300 mb-2">Puntuación Final</p>
           <p id="final-score" class="title-font text-5xl text-emerald-400 neon-text mb-4">0</p>
 
@@ -287,6 +376,10 @@
               <p id="final-correct" class="title-font text-2xl text-cyan-400">0</p>
             </div>
           </div>
+
+          <p class="text-slate-400 text-sm mt-4">
+            Preguntas: <span id="final-q" class="text-slate-200 font-bold">0</span>/<span class="text-slate-500">30</span>
+          </p>
         </div>
 
         <div id="save-status" class="text-emerald-400 mb-4 h-6"></div>
@@ -305,7 +398,7 @@
     <!-- Leaderboard Screen -->
     <div id="leaderboard-screen" class="h-full w-full flex-col items-center justify-center p-4 relative z-10 hidden">
       <div class="text-center animate-slide-in w-full max-w-lg">
-        <h2 class="title-font text-4xl md:text-5xl font-black text-yellow-400 neon-text mb-6">🏆 PODIO 🏆</h2>
+        <h2 class="title-font text-4xl md:text-5xl font-black text-yellow-400 neon-text mb-6">🏆 RANKING DE GRUPOS 🏆</h2>
 
         <div class="glass rounded-2xl p-6 mb-4">
           <div id="leaderboard-list" class="space-y-3">
@@ -325,8 +418,10 @@
   <script>
     // Game State
     let gameState = {
-      difficulty: 'easy',
-      playerName: 'Jugador',
+      grade: 1,                // 1..3 (antes difficulty)
+      groupLetter: 'G',        // G..K
+      groupId: '1G',           // "1G"
+      playerName: '',
       score: 0,
       lives: 3,
       combo: 0,
@@ -337,34 +432,91 @@
       timeLeft: 100,
       timerInterval: null,
       answering: false,
-      lastScoreKey: null
+      lastScoreKey: null,
+      questionCount: 0,
+      maxQuestions: 30
     };
 
-    const difficultyRanges = {
-      easy: { min: 1, max: 6, time: 15000 },
-      medium: { min: 1, max: 8, time: 12000 },
-      hard: { min: 1, max: 9, time: 10000 }
+    // Rangos por grado (ajustables: 1° más fácil, 3° más retador)
+    const gradeRanges = {
+      1: { min: 1, max: 6, time: 15000 },
+      2: { min: 1, max: 8, time: 12000 },
+      3: { min: 1, max: 9, time: 10000 }
     };
 
-    function selectDifficulty(diff) {
-      gameState.difficulty = diff;
-      const buttons = ['easy', 'medium', 'hard'];
-      buttons.forEach(d => {
-        const btn = document.getElementById('diff-' + d);
-        btn.className = d === diff
+    function selectGrade(g) {
+      gameState.grade = g;
+      const grades = [1,2,3];
+      grades.forEach(x => {
+        const btn = document.getElementById('grade-' + x);
+        btn.className = (x === g)
           ? 'btn-arcade bg-gradient-to-r from-emerald-600 to-emerald-500 rounded-xl py-2 px-3 font-bold text-sm transition-all hover:scale-105 border-2 border-emerald-400'
           : 'btn-arcade bg-slate-700/50 rounded-xl py-2 px-3 font-bold text-sm transition-all hover:scale-105 border-2 border-slate-500';
       });
     }
 
+    function buildGroupId() {
+      const letter = (document.getElementById('group-letter')?.value || 'G').toUpperCase();
+      gameState.groupLetter = letter;
+      gameState.groupId = String(gameState.grade) + letter; // "1G"
+      return gameState.groupId;
+    }
+
+    // Overlay confirmación
+    function openConfirmOverlay() {
+      const overlay = document.getElementById('confirm-overlay');
+      document.getElementById('confirm-name').textContent = gameState.playerName || '—';
+      document.getElementById('confirm-group').textContent = `${gameState.grade}°${gameState.groupLetter}`;
+      overlay.classList.remove('hidden');
+      overlay.classList.add('flex');
+    }
+    function closeConfirmOverlay() {
+      const overlay = document.getElementById('confirm-overlay');
+      overlay.classList.add('hidden');
+      overlay.classList.remove('flex');
+    }
+    function confirmStart(yes) {
+      if (!yes) {
+        closeConfirmOverlay();
+        return;
+      }
+      closeConfirmOverlay();
+      startGameConfirmed();
+    }
+
+    // Botón JUGAR: valida nombre y abre overlay
     function startGame() {
-      gameState.playerName = document.getElementById('player-name').value.trim() || 'Jugador';
+      const nameInput = document.getElementById('player-name');
+      const nameError = document.getElementById('name-error');
+
+      const rawName = (nameInput.value || '').trim();
+      if (!rawName) {
+        nameError.classList.remove('hidden');
+        nameInput.classList.add('animate-shake');
+        setTimeout(() => nameInput.classList.remove('animate-shake'), 500);
+        nameInput.focus();
+        return;
+      }
+      nameError.classList.add('hidden');
+
+      gameState.playerName = rawName.slice(0, 15);
+      buildGroupId();
+
+      // overlay confirmación
+      openConfirmOverlay();
+    }
+
+    // Inicio real tras confirmar
+    function startGameConfirmed() {
       gameState.score = 0;
       gameState.lives = 3;
       gameState.combo = 0;
       gameState.maxCombo = 0;
       gameState.correctAnswers = 0;
       gameState.answering = false;
+      gameState.lastScoreKey = null;
+      gameState.questionCount = 0;
+      gameState.maxQuestions = 30;
 
       showScreen('game');
       updateUI();
@@ -372,7 +524,7 @@
     }
 
     function generateProblem() {
-      const range = difficultyRanges[gameState.difficulty];
+      const range = gradeRanges[gameState.grade];
       const a = Math.floor(Math.random() * (range.max - range.min + 1)) + range.min;
       const b = Math.floor(Math.random() * (range.max - range.min + 1)) + range.min;
       const sign1 = Math.random() < 0.5 ? 1 : -1;
@@ -398,6 +550,13 @@
     }
 
     function nextProblem() {
+      // límite de preguntas
+      if (gameState.questionCount >= gameState.maxQuestions) {
+        endGame();
+        return;
+      }
+
+      gameState.questionCount++;
       gameState.currentProblem = generateProblem();
       gameState.currentOptions = generateOptions();
       gameState.answering = false;
@@ -438,18 +597,18 @@
       }
 
       document.getElementById('feedback').innerHTML = '';
+      updateHUD();
       startTimer();
     }
 
     function startTimer() {
       if (gameState.timerInterval) clearInterval(gameState.timerInterval);
 
-      const duration = difficultyRanges[gameState.difficulty].time;
+      const duration = gradeRanges[gameState.grade].time;
       gameState.timeLeft = 100;
       const timerBar = document.getElementById('timer-bar');
       const startTime = Date.now();
 
-      // Restablece apariencia del timer al inicio
       timerBar.classList.add('progress-bar');
       timerBar.style.background = '';
 
@@ -458,7 +617,6 @@
         gameState.timeLeft = Math.max(0, 100 - (elapsed / duration * 100));
         timerBar.style.width = gameState.timeLeft + '%';
 
-        // Cambios de color por urgencia
         if (gameState.timeLeft < 30) {
           timerBar.classList.remove('progress-bar');
           timerBar.style.background = 'linear-gradient(90deg, #ef4444, #f87171)';
@@ -506,10 +664,12 @@
       showFeedback(true, points);
       updateUI();
 
-      setTimeout(() => nextProblem(), 1500);
+      setTimeout(() => {
+        if (gameState.questionCount >= gameState.maxQuestions) endGame();
+        else nextProblem();
+      }, 1500);
     }
 
-    // FIX: si se llama sin índices (tiempo agotado), calcula correctIndex internamente
     function handleWrongAnswer(correctIndex, wrongIndex) {
       gameState.combo = 0;
       gameState.lives--;
@@ -535,7 +695,10 @@
       if (gameState.lives <= 0) {
         setTimeout(() => endGame(), 1500);
       } else {
-        setTimeout(() => nextProblem(), 1500);
+        setTimeout(() => {
+          if (gameState.questionCount >= gameState.maxQuestions) endGame();
+          else nextProblem();
+        }, 1500);
       }
     }
 
@@ -571,6 +734,12 @@
       }
     }
 
+    function updateHUD() {
+      document.getElementById('hud-group').textContent = `${gameState.grade}°${gameState.groupLetter}`;
+      document.getElementById('hud-q').textContent = String(gameState.questionCount);
+      document.getElementById('hud-qmax').textContent = String(gameState.maxQuestions);
+    }
+
     function updateUI() {
       document.getElementById('score').textContent = gameState.score;
 
@@ -582,6 +751,7 @@
         heart.textContent = i < gameState.lives ? '💚' : '🖤';
         livesContainer.appendChild(heart);
       }
+      updateHUD();
     }
 
     async function endGame() {
@@ -590,6 +760,8 @@
       document.getElementById('final-score').textContent = gameState.score;
       document.getElementById('final-combo').textContent = gameState.maxCombo;
       document.getElementById('final-correct').textContent = gameState.correctAnswers;
+      document.getElementById('final-group').textContent = `${gameState.grade}°${gameState.groupLetter}`;
+      document.getElementById('final-q').textContent = String(gameState.questionCount);
 
       const saveStatus = document.getElementById('save-status');
 
@@ -598,10 +770,15 @@
         try {
           const key = await window.leaderboardApi.saveScore({
             player_name: gameState.playerName,
+            group_id: gameState.groupId,
+            grade: gameState.grade,
+            group_letter: gameState.groupLetter,
+
             score: gameState.score,
             max_combo: gameState.maxCombo,
             correct_answers: gameState.correctAnswers,
-            difficulty: gameState.difficulty
+            questions_answered: gameState.questionCount,
+            max_questions: gameState.maxQuestions
           });
           gameState.lastScoreKey = key;
           saveStatus.textContent = '✓ ¡Puntuación guardada!';
@@ -628,47 +805,52 @@
         return;
       }
 
-      const { top3, myRank, myEntry, total } =
-        await window.leaderboardApi.fetchTop3AndRank(gameState.lastScoreKey);
+      // Asegura groupId actual (por si entran directo al ranking sin jugar)
+      buildGroupId();
 
-      const medals = ['🥇', '🥈', '🥉'];
+      const { groups, myRank, totalGroups, myGroup } =
+        await window.leaderboardApi.fetchGroupRanking(gameState.groupId);
 
-      if (top3.length === 0) {
-        list.innerHTML = '<p class="text-slate-400 py-8">No hay puntuaciones aún. ¡Sé el primero!</p>';
+      if (!groups.length) {
+        list.innerHTML = '<p class="text-slate-400 py-8">No hay puntuaciones aún. ¡Que empiece el rally!</p>';
       } else {
-        list.innerHTML = top3.map((e, i) => `
-          <div class="flex items-center justify-between p-3 rounded-xl bg-gradient-to-r from-yellow-500/20 to-transparent">
-            <div class="flex items-center gap-3">
-              <span class="text-2xl w-8">${medals[i]}</span>
-              <div class="text-left">
-                <p class="font-bold text-lg">${e.player_name || 'Equipo'}</p>
-                <p class="text-xs text-slate-400">${e.created_at ? new Date(e.created_at).toLocaleDateString('es-MX') : ''}</p>
+        list.innerHTML = groups.map((g, i) => {
+          const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : '🏁';
+          const date = g.best.created_at ? new Date(g.best.created_at).toLocaleDateString('es-MX') : '';
+          const groupLabel = `${String(g.group_id).charAt(0)}°${String(g.group_id).slice(1)}`;
+          return `
+            <div class="flex items-center justify-between p-3 rounded-xl bg-gradient-to-r from-yellow-500/20 to-transparent">
+              <div class="flex items-center gap-3">
+                <span class="text-2xl w-8">${medal}</span>
+                <div class="text-left">
+                  <p class="font-black text-lg">#${i+1} — ${groupLabel}</p>
+                  <p class="text-xs text-slate-400">${date}</p>
+                </div>
+              </div>
+              <div class="text-right">
+                <p class="title-font text-xl text-emerald-400">${g.best.score || 0}</p>
+                <p class="text-xs text-slate-400">mejor puntaje</p>
               </div>
             </div>
-            <div class="text-right">
-              <p class="title-font text-xl text-emerald-400">${e.score || 0}</p>
-              <p class="text-xs text-yellow-400">Combo x${e.max_combo || 0}</p>
-            </div>
-          </div>
-        `).join('');
+          `;
+        }).join('');
       }
 
       if (myRank) {
+        const groupLabel = `${String(myGroup.group_id).charAt(0)}°${String(myGroup.group_id).slice(1)}`;
         myRankBox.innerHTML = `
           <div class="glass rounded-2xl p-4">
-            <p class="text-slate-200">Tu lugar en el ranking:</p>
-            <p class="title-font text-3xl text-cyan-400">#${myRank} <span class="text-slate-400 text-base">(de ${total})</span></p>
+            <p class="text-slate-200">Tu grupo en el ranking:</p>
+            <p class="title-font text-3xl text-cyan-400">
+              #${myRank} <span class="text-slate-400 text-base">(de ${totalGroups})</span>
+            </p>
             <p class="text-slate-200 mt-1">
-              ${myEntry?.player_name || ''} — <span class="text-emerald-400 font-bold">${myEntry?.score || 0}</span> pts
+              ${groupLabel} — <span class="text-emerald-400 font-bold">${myGroup.best.score || 0}</span> pts
             </p>
           </div>
         `;
       } else {
-        myRankBox.innerHTML = `
-          <div class="text-slate-400">
-            Juega una partida y guarda tu puntuación para ver tu lugar.
-          </div>
-        `;
+        myRankBox.innerHTML = `<div class="text-slate-400">Selecciona tu grado/grupo o juega una partida para aparecer.</div>`;
       }
     }
 
@@ -689,9 +871,9 @@
       targetEl.classList.add('flex');
     }
 
-    // Init
-    // (No hay elementSdk/dataSdk en GitHub Pages; Firebase se inicializa arriba en module)
-    selectDifficulty('easy');
+    // init
+    selectGrade(1);
+    document.getElementById('group-letter').addEventListener('change', buildGroupId);
   </script>
 </body>
 </html>
